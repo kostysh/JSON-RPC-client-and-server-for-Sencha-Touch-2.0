@@ -1,0 +1,102 @@
+JSON-RPC client and server for Sencha Touch
+
+This components you can use for build communication between Sencha Touch 2.0 
+application and server via JSON-RPC protocol.
+
+Requires:
+- Sencha Touch 2.0
+- PHP 5.3 (for server)
+
+Features:
+- Conforms to JSON-RPC 2.0 Specification
+- Single and batch requests
+- Simple setup and usage
+
+Client usage:
+    
+    // Initialisation of jsonRPC client
+    var jsonRPC = Ext.create('Cs.client.JsonRPC', {
+        url: 'http://path-to-your-server/rpc',
+        timeout: 20000,
+        scope: this,
+        api: {
+            getFields: function(result) {
+                console.log(result);
+            },
+            saveFields: function(result) {
+                console.log(result);
+            },
+            error: function(result) {
+                console.log(result['message']);
+            }
+        }
+    });
+    
+    // Single request to 'getFields' remote method
+    jsonRPC.request({
+        method: 'getFields'
+    });
+    
+    // Single request to 'saveFields' remote method
+    jsonRPC.request({
+        method: 'saveFields',
+        params: {
+            field1: 'value1',
+            field2: 'value2
+        }
+    });
+    
+    // Batch request
+    jsonRPC.request(
+        {
+            method: 'getFields',
+            batchOrder: 1
+        },
+        {
+            method: 'saveFields',
+            params: {
+                field1: 'value1',
+                field2: 'value2
+            },
+            batchOrder: 2
+        },
+        {
+            method: 'getFail',
+            batchOrder: 0
+        }
+    );
+
+
+Server usage:
+    // Include server lib
+    require_once('JsonRpcServer.php');
+
+    // Your custom server API
+    class Api {
+        public function __construct() {
+
+        }
+
+        public function getFields() {
+            $params = array();
+            $params['field1'] = 'value1';
+            $params['field2'] = 'value2';
+            $params['field3'] = 'value3';
+            return $params;
+        }
+
+        public function saveFields($params) {
+            return count($params);
+        }
+    };
+    
+    // Setup your server
+    $server = new jsonRPC(new Api());
+    
+    // Start requests handling
+    $server->start();
+
+Version 1.0: 
+First fersion
+
+License: MIT
