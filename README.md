@@ -32,11 +32,18 @@ Client usage:
 
 - Place src/ux to your app folder;
 - Place src/php to your server;
-- Configure custom path for custom components: 
+- Configure custom path for custom components:
 
 <!-- language: lang-js -->
             
-    // Initialisation of jsonRPC client
+    Ext.Loader.setPath({
+        'Ext.ux': '../src/ux'
+    });
+
+- Initialisation of jsonRPC client
+
+<!-- language: lang-js -->
+            
     var jsonRPC = Ext.create('Ext.ux.data.Jsonrpc', {
         url: 'http://path-to-your-server/rpc',
         timeout: 20000,
@@ -54,12 +61,18 @@ Client usage:
         }
     });
     
-    // Single request to 'getFields' remote method
+- Single request to 'getFields' remote method
+
+<!-- language: lang-js -->
+            
     jsonRPC.request({
         method: 'getFields'
     });
     
-    // Single request to 'saveFields' remote method
+- Single request to 'saveFields' remote method
+
+<!-- language: lang-js -->
+            
     jsonRPC.request({
         method: 'saveFields',
         params: {
@@ -68,7 +81,10 @@ Client usage:
         }
     });
     
-    // Batch request
+- Batch request
+
+<!-- language: lang-js -->
+            
     jsonRPC.request(
         {
             method: 'getFields',
@@ -78,7 +94,8 @@ Client usage:
             method: 'saveFields',
             params: {
                 field1: 'value1',
-                field2: 'value2
+                field2: 'value2,
+                field3: 'value3,
             },
             batchOrder: 2
         },
@@ -109,8 +126,9 @@ Server usage:
             return $params;
         }
 
-        public function saveFields($params) {
-            return count($params);
+        public function saveFields($field1, $field2, $field3) {
+            return 'We are really got your fields: ' . 
+                   var_export(func_get_args(), true);
         }
     };
     
