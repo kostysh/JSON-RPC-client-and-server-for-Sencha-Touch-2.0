@@ -17,8 +17,8 @@ Requires:
 
 Versions:
 =========
-2.0 New namespace, refactored code, bug fixes, GPL license, demo app
-1.0 Initial release  
+- 2.0 New namespace, refactored code, bug fixes, GPL license, demo app
+- 1.0 Initial release  
 
 Features:
 =========
