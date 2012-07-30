@@ -17,8 +17,8 @@ Requires:
 
 Versions:
 =========
-- 2.0 New namespace, refactored code, bug fixes, GPL license, demo app
-- 1.0 Initial release  
+- 2.0: New namespace, refactored code, bug fixes, GPL license, demo app
+- 1.0: Initial release  
 
 Features:
 =========
@@ -33,6 +33,7 @@ Client usage:
 - Place src/ux to your app folder;
 - Place src/php to your server;
 - Configure custom path for custom components: 
+
 <!-- language: lang-js -->
             
     // Initialisation of jsonRPC client
