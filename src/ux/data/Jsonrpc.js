@@ -465,9 +465,9 @@ Ext.define('Ext.ux.data.Jsonrpc', {
                 },
                 timeout: me.getTimeout(),
                 jsonData: batchPrefix + parsedRequest + batchPostfix,
-                success: function() {
+                success: function(response, opts) {
                     try {
-                        var result = Ext.decode(arguments[2].responseText);
+                        var result = Ext.decode(response.responseText);
 
                         if (Ext.isArray(result)) {
                             for (var i in result) {
