@@ -5,8 +5,8 @@
  * @fileOverview JSON-RPC spec. version 2.0 conformed client for Sencha Touch
  *
  * @author Constantine V. Smirnov kostysh(at)gmail.com
- * @date 20120730
- * @version 2.0
+ * @date 20120818
+ * @version 2.0.1
  * @license GNU GPL v3.0
  *
  * @requires Sencha Touch 2.0
@@ -183,21 +183,6 @@ Ext.define('Ext.ux.data.Jsonrpc', {
         // Build connection instance
         me.connection = Ext.create('Ext.data.Connection', {
             useDefaultXhrHeader: false
-        });
-        
-        // Setup connection exception handler
-        me.connection.on({
-            scope: me,
-            requestexception: function(conn, response, options, eOpts) {
-                me.fireEvent('exception', {
-                    title: 'Connection error',
-                    message: 'Request exception',
-                    response: response,
-                    options: options,
-                    eOpts: eOpts,
-                    time: new Date()
-                });
-            }
         });
         
         // Requests collection
@@ -480,12 +465,11 @@ Ext.define('Ext.ux.data.Jsonrpc', {
                 },
                 timeout: me.getTimeout(),
                 jsonData: batchPrefix + parsedRequest + batchPostfix,
-                callback: function() {
-
+                success: function() {
                     try {
                         var result = Ext.decode(arguments[2].responseText);
 
-                        if (typeof result.length !== 'undefined') {
+                        if (Ext.isArray(result)) {
                             for (var i in result) {
                                 me.processResult(result[i]);
                             }
@@ -495,6 +479,15 @@ Ext.define('Ext.ux.data.Jsonrpc', {
                     } catch(err) {
                         me.fireEvent('exception', err);
                     }
+                },
+                failure: function(response, opts) {
+                    me.fireEvent('exception', {
+                        title: 'Connection error',
+                        message: 'Server not respond. <br/>Try again later, please',
+                        response: response,
+                        opts: opts,
+                        time: new Date()
+                    });
                 }
             };
             
@@ -517,7 +510,7 @@ Ext.define('Ext.ux.data.Jsonrpc', {
         var me = this;
         var api = me.getApi();
         
-        if (Ext.isFunction(api.error)) {
+        if (Ext.isFunction(api['error'])) {
             if (!Ext.isDefined(err.title)) {
                 err.title = 'Exception';
             }
