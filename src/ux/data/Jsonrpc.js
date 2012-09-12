@@ -5,11 +5,11 @@
  * @fileOverview JSON-RPC spec. version 2.0 conformed client for Sencha Touch
  *
  * @author Constantine V. Smirnov kostysh(at)gmail.com
- * @date 20120904
- * @version 2.1
+ * @date 20120912
+ * @version 2.1 Beta
  * @license GNU GPL v3.0
  * 
- * @thanks for toXmlValue to http://code.google.com/p/json-xml-rpc/
+ * @thanks for toXmlRpc/parseXmlRpc to http://code.google.com/p/json-xml-rpc/
  *
  * @requires Sencha Touch 2.0
  * @requires Ext.mixin.Observable 
@@ -20,62 +20,91 @@
  * 
  * Usage:
     
-    // JsonRPC client initialization 
+    // JsonRPC client initialization
     var jsonRPC = Ext.create('Ext.ux.data.Jsonrpc', {
         url: 'http://path-to-your-server/rpc',
+        protocol: 'JSON-RPC',// or XML-RPC
         timeout: 20000,
-        scope: this,
-        api: {
+        scope: me,
+        
+        // Remote API definition
+        api: [
+            {
+                name: 'getFields',
+                params: null // or simply do not define
+            },
+            {
+                name: 'saveFields',
+                model: 'Jsonrpc.model.SaveFields'// Ext.data.Model config 
+            }
+        ],
+
+        // Hooks - these callbacks will be called before regular callbacks
+        // you can manipulate result value inside
+        hooks: {
             getFields: function(result) {
-                console.log(result);
+
+                // <debug>
+                if (Ext.isObject(result)) {
+                    console.log('Server response: ', result);
+                }
+                // </debug>
+
+                return result;
             },
             saveFields: function(result) {
-                console.log(result);
-            },
-            error: function(result) {
-                console.log(result['message']);
+
+                // <debug>
+                console.log('Server response: ', result);
+                // </debug>
+
+                return result;
             }
+        },
+        
+        // Default exception handler
+        error: function(err) {
+            Ext.device.Notification.show({
+                title: err.title || 'Fail!',
+                message: err.message || 'Unknown error'
+            });
         }
     });
-    
+        
     // Single request to 'getFields' remote method
-    jsonRPC.request({
-        method: 'getFields'
+    jsonRPC.getFields(function(fields) {
+        me.getForm().setValues(fields);
     });
-    
+        
     // Single request to 'saveFields' remote method
-    jsonRPC.request({
-        method: 'saveFields',
-        params: {
-            field1: 'value1',
-            field2: 'value2
-        }
+    // @param {Object/Array/Function} Data fields (named or by-position), callback function
+    jsonRPC.saveFields(values, function(result) {
+        Ext.device.Notification.show({
+            title: 'Server response',
+            message: result
+        });
     });
     
     // Batch request
     jsonRPC.request(
         {
+            method: 'saveFields',
+            params: form.getValues(),
+            batchOrder: 2,
+            callback: function(result) {
+                console.log('Server response: ', result);
+            }
+        },
+        {
             method: 'getFields',
             batchOrder: 1
-        },
-        {
-            method: 'saveFields',
-            params: {
-                field1: 'value1',
-                field2: 'value2
-            },
-            batchOrder: 2
-        },
-        {
-            method: 'getFail',
-            batchOrder: 0
         }
     );
   
  */
 
 /**
-    Request configuration sample
+    Raw request configuration sample
     ...
     {
         method: 'remoteMethodName',
@@ -84,7 +113,11 @@
             param2: 'value2
         },
         scope: this, // Scope for callback (optional)
-        batchOrder: 1 // for batch requests only
+        batchOrder: 1,// Batch sorting order (optional), for batch requests only
+        callback: function() {
+            // Method callback (optional)
+            // ...
+        } 
     }
  
  */
@@ -167,6 +200,7 @@ Ext.define('Ext.ux.data.Jsonrpc', {
         
         /**
          * JsonRPC client configuration
+         * @cfg {String} protocol Base protocol type. JSON-RPC/XML-RPC
          * @cfg {String} url URL to JSON-RPC server
          * @cfg {Object} api Remote procedures config
          * @cfg {Object} hooks Remote procedures response hooks config

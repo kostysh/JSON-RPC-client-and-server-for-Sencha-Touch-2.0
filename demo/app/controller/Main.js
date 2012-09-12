@@ -50,8 +50,8 @@ Ext.define('Jsonrpc.controller.Main', {
         });
         
         me.jsonRPC = Ext.create('Ext.ux.data.Jsonrpc', {
-            url: '../src/php/server/jsonrpc.php',// Use this path for local testing
-//            url: 'http://mindsaur.com/demo/jsonrpc/server/jsonrpc.php',// Server demo
+//            url: '../src/php/server/jsonrpc.php',// Use this path for local testing
+            url: 'http://mindsaur.com/demo/jsonrpc/server/jsonrpc.php',// Server demo
             protocol: 'XML-RPC',
             timeout: 20000,
             scope: me,
@@ -185,7 +185,13 @@ Ext.define('Jsonrpc.controller.Main', {
             {
                 method: 'saveFields',
                 params: form.getValues(),
-                batchOrder: 2
+                batchOrder: 2,
+                callback: function() {
+                    Ext.device.Notification.show({
+                        title: 'Done',
+                        message: 'Comments in console'
+                    });
+                }
             },
             {
                 method: 'getFields',

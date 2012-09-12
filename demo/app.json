@@ -128,7 +128,7 @@
     "buildOptions": {
         "product": "touch",
         "minVersion": 3,
-        "debug": false,
+        "debug": true,
         "logger": "yes"
     },
 

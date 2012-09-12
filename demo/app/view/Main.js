@@ -118,7 +118,7 @@ Ext.define('Jsonrpc.view.Main', {
                 layout: 'fit',
                 styleHtmlContent: true,
                 html: '<p><strong>JSON-RPC-client-and-server-for-Sencha-Touch-2.0 demo</strong></p>' +
-                      '<p>Version: 2.0</p>' +
+                      '<p>Version: 2.1 Beta</p>' +
                       '<p>Author: Constantine Smirnov, <a href="http://mindsaur.com">http://mindsaur.com</a></p>' +
                       '<p>License: GNU GPL v3.0</p>' +
                       '<p>GitHub: <a href="https://github.com/kostysh/JSON-RPC-client-and-server-for-Sencha-Touch-2.0">JSON-RPC-client-and-server-for-Sencha-Touch-2.0</a></p>',
