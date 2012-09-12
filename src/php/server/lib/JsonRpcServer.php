@@ -62,16 +62,18 @@ const ERROR_SERVER_ERROR     = -32099;
 // Main class definition
 class jsonRPC {
     
+    public $mode;
     protected $api;
     protected $input;
     protected $request;
     protected $response;
 
     public function __construct(&$api) {
+        $this->mode = 'json';
         $this->api = $api;        
         $this->input = 'php://input';
-        $this->request = new Request();
-        $this->response = new Response();
+        $this->request = new Request($this);
+        $this->response = new Response($this);
     }
     
     public function setError(&$err, $id = null) {
@@ -158,7 +160,7 @@ class jsonRPC {
 
     public function start() {
         try {
-            $json = file_get_contents($this->input);            
+            $rawRequest = file_get_contents($this->input);            
         } catch (Exception $e) {
             $message = "Unable to read request: ";
             $message .= PHP_EOL . $e->getMessage();
@@ -166,7 +168,17 @@ class jsonRPC {
             $this->sendError($error->getAll());
         }
         
-        $this->request->parse($json);
+        if (preg_match("/^\s*<\?xml\b/", $rawRequest)) {
+            
+            // Switch server to xml-rpc mode
+            $this->mode = 'xml';
+        } else {
+            
+            // Switch server to json-rpc mode
+            $this->mode = 'json';
+        }
+        
+        $this->request->parse($rawRequest);
         
         if ($this->request->hasException()) {
             $this->sendError($this->request->getError(), $this->request->getId());

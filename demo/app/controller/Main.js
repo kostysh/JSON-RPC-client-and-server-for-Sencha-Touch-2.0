@@ -50,43 +50,104 @@ Ext.define('Jsonrpc.controller.Main', {
         });
         
         me.jsonRPC = Ext.create('Ext.ux.data.Jsonrpc', {
-//            url: '../src/php/server/jsonrpc.php',// Use this path for local testing
-            url: 'http://mindsaur.com/demo/jsonrpc/server/jsonrpc.php',// Server demo
+            url: '../src/php/server/jsonrpc.php',// Use this path for local testing
+//            url: 'http://mindsaur.com/demo/jsonrpc/server/jsonrpc.php',// Server demo
+            protocol: 'XML-RPC',
             timeout: 20000,
             scope: me,
-            api: {
-                getFields: function(fields) {
-                    me.getForm().setValues(fields);
+            api: [
+                {
+                    name: 'getFields',
+                    params: null // or simply do not define
+                },
+                {
+                    name: 'saveFields',
+//                    model: 'Jsonrpc.model.SaveFields',
+                    
+                    // You can define model before of params directly here
+                    params: [
+                        {name: 'field1', type: 'string'},
+                        {name: 'field2', type: 'string', convert: function(val) {
+                            if (Ext.isEmpty(val)) {
+                                return 'Chupacabra';
+                            } else {
+                                return val;
+                            }
+                        }},
+                        {name: 'field3', type: 'string'}
+                    ],
+                    
+                    validations: [
+                        {type: 'presence', field: 'field1'},
+                        {type: 'presence', field: 'field2'},
+                        {type: 'presence', field: 'field3'}
+                    ]
+                }
+            ],
+            hooks: {
+                getFields: function(result) {
+                    
+                    // <debug>
+                    if (Ext.isObject(result)) {
+                        console.log('Server response: ', result);
+                    }
+                    // </debug>
+                    
+                    return result;
                 },
                 saveFields: function(result) {
-                    Ext.device.Notification.show({
-                        title: 'Perfect!',
-                        message: result
-                    });
-                },
-                error: function(err) {
-                    Ext.device.Notification.show({
-                        title: err.title || 'Fail!',
-                        message: err.message || 'Unknown error'
-                    });
+                    
+                    // <debug>
+                    console.log('Server response: ', result);
+                    // </debug>
+                    
+                    return result;
                 }
+            },
+            error: function(err) {
+                Ext.device.Notification.show({
+                    title: err.title || 'Fail!',
+                    message: err.message || 'Unknown error'
+                });
             }
         });
     },
     
     onSendBtnTap: function() {
+        var me = this;
         var form = this.getForm();
+        var values = form.getValues();
         
-        this.jsonRPC.request({
-            method: 'saveFields',
-            params: form.getValues()
+        // XML-RPC protocol does not support named parameters
+        // so we should define a fields order for request
+        Ext.applyIf(values, {
+            fieldsSortOrder: ['field1', 'field2', 'field3']
         });
+        
+        me.jsonRPC.saveFields(values, function(result) {
+            Ext.device.Notification.show({
+                title: 'Server response',
+                message: result
+            });
+        });
+        
+//        this.jsonRPC.request({
+//            method: 'saveFields',
+//            params: form.getValues()
+//        });
     },
     
     onGetBtnTap: function() {
-        this.jsonRPC.request({
-            method: 'getFields'
-        });        
+        var me = this;
+        
+        me.jsonRPC.getFields(function(fields) {
+            me.getForm().setValues(fields);
+        });
+        
+        
+//        this.jsonRPC.request({
+//            method: 'getFields'
+//        });        
     },
     
     onErrBtnTap: function() {

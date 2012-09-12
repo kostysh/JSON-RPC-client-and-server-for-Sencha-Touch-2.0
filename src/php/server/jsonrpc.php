@@ -33,8 +33,14 @@ class Api {
     }
     
     public function saveFields($field1, $field2, $field3) {
-        return 'Hey dude! We are really got your fields: ' . 
-               var_export(func_get_args(), true);
+        if ($field2 === 'Chupacabra') {
+            return 'Chupacabra detected on second field!!!';
+        } else {
+            return 'Hey dude! We are really got your fields: ' . 
+                   'field1=[' . $field1 . ']; ' . 
+                   'field2=[' . $field2 . ']; ' .
+                   'field3=[' . $field3 . ']';
+        }
     }
 };
 

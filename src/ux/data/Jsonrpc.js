@@ -5,15 +5,18 @@
  * @fileOverview JSON-RPC spec. version 2.0 conformed client for Sencha Touch
  *
  * @author Constantine V. Smirnov kostysh(at)gmail.com
- * @date 20120818
- * @version 2.0.1
+ * @date 20120904
+ * @version 2.1
  * @license GNU GPL v3.0
+ * 
+ * @thanks for toXmlValue to http://code.google.com/p/json-xml-rpc/
  *
  * @requires Sencha Touch 2.0
  * @requires Ext.mixin.Observable 
  * @requires Ext.data.Connection
  * @requires Ext.data.identifier.Uuid
  * @requires Ext.util.MixedCollection
+ * @requires Ext.DateExtras
  * 
  * Usage:
     
@@ -116,7 +119,11 @@ Ext.define('Ext.ux.data.Jsonrpc', {
     requires: [
         'Ext.data.Connection',
         'Ext.data.identifier.Uuid',
-        'Ext.util.MixedCollection'
+        'Ext.data.Field',
+        'Ext.data.ModelManager',
+        'Ext.data.Model',
+        'Ext.util.MixedCollection',
+        'Ext.DateExtras'
     ],
     
     /**
@@ -147,7 +154,7 @@ Ext.define('Ext.ux.data.Jsonrpc', {
      * Request hooks
      * @private
      */
-    requestHooks: {},
+    requestsHooks: null,
     
     /**
      * Initialization flag
@@ -161,15 +168,29 @@ Ext.define('Ext.ux.data.Jsonrpc', {
         /**
          * JsonRPC client configuration
          * @cfg {String} url URL to JSON-RPC server
-         * @cfg {Object} api Callbacks for remote procedures
+         * @cfg {Object} api Remote procedures config
+         * @cfg {Object} hooks Remote procedures response hooks config
+         * @cfg {Function} error Default error callback
          * @cfg {Integer} timeout Timeout before connection abort (in milliseconds)
          * @cfg {Object} scope Default scope for RPC callbacks
          */
         
+        protocol: 'JSON-RPC',
         url: '',
         api: null,
+        hooks: null,
+        error: null,
         timeout: 30000,
-        scope: window
+        scope: window,
+        
+        /**
+         * Base http headers for requests
+         * @private
+         * @cfg {Object} headers Key-value object with headers
+         * @cfg {Object} extraHeaders Key-value object with additional headers
+         */
+        headers: {},
+        extraHeaders: {}
     },
     
     /**
@@ -178,7 +199,6 @@ Ext.define('Ext.ux.data.Jsonrpc', {
      */
     constructor: function(config) {
         var me = this;
-        me.initConfig(config);
         
         // Build connection instance
         me.connection = Ext.create('Ext.data.Connection', {
@@ -188,8 +208,13 @@ Ext.define('Ext.ux.data.Jsonrpc', {
         // Requests collection
         me.requests = Ext.create('Ext.util.MixedCollection');
         
+        // Requests hooks collection
+        me.requestsHooks = Ext.create('Ext.util.MixedCollection');
+        
         // UUID generator setup
         me.uuid = Ext.create('Ext.data.identifier.Uuid');
+        
+        me.initConfig(config);
         
         me.fireAction('beforeinitialized', [me], me.setInitialized);
     },
@@ -217,30 +242,624 @@ Ext.define('Ext.ux.data.Jsonrpc', {
     },
     
     /**
-     * Define callback methods for remote api
-     * @method
-     * @param {Object} api Object with api methods config
+     * @private
      */
-    applyApi: function(api) {
+    escapeString: function(value) {
+        var HTML_SPEC_CHAR = {
+            '<': '&lt;',
+            '>': '&gt;',
+            '&': '&amp;',
+            '"': '&quot;',
+            "'": '&#39;'
+        };
+        return value.replace(/[<>&"']/, function(ch){
+            return HTML_SPEC_CHAR[ch];
+        });
+    },
+    
+    /**
+     * @private
+     */
+    dateToISO8601: function(date){
+        return Ext.Date.format(date, Ext.Date.patterns.ISO8601Long);
+    },
+    
+    /**
+     * @private
+     */
+    toXmlRpc: function(value){
+        var me = this;
+        var xml = ['<value>'];
         
-        // @todo Deep validation for api methods
-        if (!Ext.isObject(api)) {
-            var err = {
-                title: 'Configuration error',
-                message: 'Wrong api configuration object',
-                time: new Date()
-            };            
-            this.fireEvent('exception', err);            
-            return null;
+        switch(typeof value){
+            case 'number':
+                if (!isFinite(value))
+                    xml.push('<nil/>');
+                else if (parseInt(value) == Math.ceil(value)){
+                    xml.push('<int>');
+                    xml.push(value.toString());
+                    xml.push('</int>');
+                }
+                else {
+                    xml.push('<double>');
+                    xml.push(value.toString());
+                    xml.push('</double>');
+                }
+                break;
+            
+            case 'boolean':
+                xml.push('<boolean>');
+                xml.push(value ? '1' : '0');
+                xml.push('</boolean>');
+                break;
+            
+            case 'string':
+                xml.push('<string>');
+                xml.push(me.escapeString(value)); 
+                xml.push('</string>');
+                break;
+            
+            case 'object':
+                if(value === null) {
+                    xml.push('<nil/>');
+                } else if (value instanceof Array){
+                    xml.push('<array><data>');
+                    for (var i = 0; i < value.length; i++) {
+                        xml.push(me.toXmlRpc(value[i]));
+                    }                        
+                    xml.push('</data></array>');
+                } else if (value instanceof Date){
+                    xml.push('<dateTime.iso8601>' + me.dateToISO8601(value) + '</dateTime.iso8601>');
+                } else if (value instanceof Number || 
+                           value instanceof String || 
+                           value instanceof Boolean) {
+                           
+                    return me.dateToISO8601(value.valueOf());
+                } else {
+                    xml.push('<struct>');
+                    var useHasOwn = {}.hasOwnProperty ? true : false; //From Ext's JSON.js
+                    for (var key in value){
+                        if(!useHasOwn || value.hasOwnProperty(key)){
+                            xml.push('<member>');
+                            xml.push('<name>' + me.escapeString(key) + '</name>');
+                            xml.push(me.toXmlRpc(value[key]));
+                            xml.push('</member>');
+                        }
+                    }
+                    xml.push('</struct>');
+                }
+                break;
+            
+            case 'undefined':
+            case 'function':
+            case 'unknown':
+                break;
+            
+            default:
+                me.fireEvent('exception', {
+                    title: 'Data type error',
+                    message: 'Unable to convert the value of type ' +
+                             '"' + typeof(value) + '" to XML-RPC format',
+                    time: new Date()
+                });
+                return '';
+        }
+        xml.push('</value>');
+        return xml.join('');
+    },
+    
+    /**
+     * @private
+     */
+    parseXmlRpc: function(valueEl){
+        var me = this;
+        
+        if(valueEl.childNodes.length == 1 &&
+           valueEl.childNodes.item(0).nodeType == 3) {
+            
+            return valueEl.childNodes.item(0).nodeValue;
         }
         
-        return Ext.apply({
+        for (var i=0; i < valueEl.childNodes.length; i++) {
             
-            // Default error callback (if not defined in api config)
-            error: function(err) {
-                console.log('jsonRPC client error:', err.message);
+            if (valueEl.childNodes.item(i).nodeType === 1) {
+                
+                var typeEL = valueEl.childNodes.item(i);
+                switch (typeEL.nodeName.toLowerCase()) {
+                    case 'i4':
+                    case 'int':
+                        //An integer is a 32-bit signed number. You can include a plus or minus at the
+                        //   beginning of a string of numeric characters. Leading zeros are collapsed.
+                        //   Whitespace is not permitted. Just numeric characters preceeded by a plus or minus.
+                        var intVal = parseInt(typeEL.firstChild.nodeValue);
+                        
+                        if (isNaN(intVal)) {
+                            me.fireEvent('exception', {
+                                title: 'XML-RPC Parse Error',
+                                message: "The value provided as an integer '" +
+                                         '"' + typeEL.firstChild.nodeValue + "' is invalid.",
+                                time: new Date()
+                            });
+                            return '';
+                        }   
+                        
+                        return intVal;
+                        
+                    case 'double':
+                        //There is no representation for infinity or negative infinity or "not a number".
+                        //   At this time, only decimal point notation is allowed, a plus or a minus,
+                        //   followed by any number of numeric characters, followed by a period and any
+                        //   number of numeric characters. Whitespace is not allowed. The range of
+                        //   allowable values is implementation-dependent, is not specified.
+                        var floatVal = parseFloat(typeEL.firstChild.nodeValue);
+                        
+                        if (isNaN(floatVal)) {
+                            me.fireEvent('exception', {
+                                title: 'XML-RPC Parse Error',
+                                message: "The value provided as a double '" +
+                                         '"' + typeEL.firstChild.nodeValue + "' is invalid.",
+                                time: new Date()
+                            });
+                            
+                            return '';
+                        }
+                            
+                        return floatVal;
+                    
+                    case 'boolean':
+                        if (typeEL.firstChild.nodeValue != '0' && 
+                            typeEL.firstChild.nodeValue != '1') {
+                            
+                            me.fireEvent('exception', {
+                                title: 'XML-RPC Parse Error',
+                                message: "The value provided as a boolean '" +
+                                         '"' + typeEL.firstChild.nodeValue + "' is invalid.",
+                                time: new Date()
+                            });
+                            
+                            return '';
+                        }
+                        
+                        return Boolean(parseInt(typeEL.firstChild.nodeValue));
+                    
+                    case 'string':
+                        if (!typeEL.firstChild) {
+                            return "";
+                        }
+                            
+                        return typeEL.firstChild.nodeValue;
+                    
+                    case 'datetime.iso8601':
+                        var matches, date = new Date(0);
+                        
+                        if (matches = typeEL.firstChild.nodeValue.match(/^(?:(\d\d\d\d)-(\d\d)(?:-(\d\d)(?:T(\d\d)(?::(\d\d)(?::(\d\d)(?:\.(\d+))?)?)?)?)?)$/)){
+                            if(matches[1]) date.setUTCFullYear(parseInt(matches[1]));
+                            if(matches[2]) date.setUTCMonth(parseInt(matches[2]-1));
+                            if(matches[3]) date.setUTCDate(parseInt(matches[3]));
+                            if(matches[4]) date.setUTCHours(parseInt(matches[4]));
+                            if(matches[5]) date.setUTCMinutes(parseInt(matches[5]));
+                            if(matches[6]) date.setUTCMilliseconds(parseInt(matches[6]));
+                            
+                            return date;
+                        }
+                        
+                        me.fireEvent('exception', {
+                            title: 'XML-RPC Parse Error',
+                            message: 'The provided value does not match ISO8601',
+                            time: new Date()
+                        });
+                        
+                        return '';
+                    
+                    case 'base64':
+                        return me.decode64(typeEL.firstChild.nodeValue);
+                    
+                    case 'nil':
+                        return null;
+                    
+                    case 'struct':
+                        //A <struct> contains <member>s and each <member> contains a <name> and a <value>.
+                        var obj = {};
+                        
+                        for (var memberEl, j = 0; memberEl = typeEL.childNodes.item(j); j++) {
+                            if (memberEl.nodeType == 1 && memberEl.nodeName == 'member') {
+                                var name = '';
+                                valueEl = null;
+                                for (var child, k = 0; child = memberEl.childNodes.item(k); k++) {
+                                    if (child.nodeType == 1) {
+                                        if(child.nodeName == 'name') {
+                                            name = child.firstChild.nodeValue;
+                                        } else if (child.nodeName == 'value') {
+                                            valueEl = child;
+                                        }                                            
+                                    }
+                                }
+                                //<struct>s can be recursive, any <value> may contain a <struct> or
+                                //   any other type, including an <array>, described below.
+                                if(name && valueEl) {
+                                    obj[name] = me.parseXmlRpc(valueEl);
+                                }                                    
+                            }
+                        }
+                        return obj;
+                    
+                    case 'array':
+                        //An <array> contains a single <data> element, which can contain any number of <value>s.
+                        var arr = [];
+                        var dataEl = typeEL.firstChild;
+                        
+                        while(dataEl && (dataEl.nodeType != 1 || dataEl.nodeName != 'data')) {
+                            dataEl = dataEl.nextSibling;
+                        }
+                    
+                        if(!dataEl) {
+                            me.fireEvent('exception', {
+                                title: 'XML-RPC Parse Error',
+                                message: "Expected 'data' element as sole child element of 'array'",
+                                time: new Date()
+                            });
+
+                            return '';
+                        }
+                    
+                        valueEl = dataEl.firstChild;
+                        
+                        while(valueEl){
+                            if(valueEl.nodeType == 1){
+                                //<arrays>s can be recursive, any value may contain an <array> or
+                                //   any other type, including a <struct>, described above.
+                                if(valueEl.nodeName == 'value') {
+                                    arr.push(me.parseXmlRpc(valueEl));
+                                } else {
+                                    me.fireEvent('exception', {
+                                        title: 'XML-RPC Parse Error',
+                                        message: "Illegal element child '" + valueEl.nodeName + "' of an array's 'data' element",
+                                        time: new Date()
+                                    });
+
+                                    return '';
+                                }
+                            }
+                            valueEl = valueEl.nextSibling;
+                        }
+                        return arr;
+                    
+                    default:
+                        me.fireEvent('exception', {
+                            title: 'XML-RPC Parse Error',
+                            message: "Illegal element '" + typeEL.nodeName + "' child of the 'value' element",
+                            time: new Date()
+                        });
+
+                        return '';
+                }
             }
-        }, api);
+        }
+        
+        return '';
+    },
+    
+    /**
+     * @private
+     */
+    extractXmlRpcValueEl: function(dom) {
+        var valueEl = dom.getElementsByTagName('value')[0];
+        if(valueEl.parentNode.nodeName == 'param' &&
+           valueEl.parentNode.parentNode.nodeName == 'params') {
+            
+            return valueEl;
+        } else {
+            return undefined;
+        }
+    },
+    
+    /**
+     * @private
+     */
+    decode64: function(input) {
+        var keyStr = "ABCDEFGHIJKLMNOP" +
+                     "QRSTUVWXYZabcdef" +
+                     "ghijklmnopqrstuv" +
+                     "wxyz0123456789+/" +
+                     "=";
+        var output = "";
+        var chr1, chr2, chr3 = "";
+        var enc1, enc2, enc3, enc4 = "";
+        var i = 0;
+
+        // remove all characters that are not A-Z, a-z, 0-9, +, /, or =
+        input = input.replace(/[^A-Za-z0-9\+\/\=]/g, "");
+
+        do {
+            enc1 = keyStr.indexOf(input.charAt(i++));
+            enc2 = keyStr.indexOf(input.charAt(i++));
+            enc3 = keyStr.indexOf(input.charAt(i++));
+            enc4 = keyStr.indexOf(input.charAt(i++));
+
+            chr1 = (enc1 << 2) | (enc2 >> 4);
+            chr2 = ((enc2 & 15) << 4) | (enc3 >> 2);
+            chr3 = ((enc3 & 3) << 6) | enc4;
+
+            output = output + String.fromCharCode(chr1);
+
+            if (enc3 != 64) {
+                output = output + String.fromCharCode(chr2);
+            }
+            if (enc4 != 64) {
+                output = output + String.fromCharCode(chr3);
+            }
+
+            chr1 = chr2 = chr3 = "";
+            enc1 = enc2 = enc3 = enc4 = "";
+
+        } while (i < input.length);
+
+        return unescape(output);
+    },
+    
+    /**
+     * @private
+     */
+    applyProtocol: function(protocol) {
+        switch (protocol) {
+            case 'JSON-RPC':
+            case 'XML-RPC':
+                return protocol;
+            default: 
+                return 'JSON-RPC';
+        }
+    },
+    
+    /**
+     * @private
+     */
+    updateProtocol: function(protocol) {
+        var me = this;
+        if (Ext.isDefined(protocol) && protocol === 'XML-RPC') {
+            me.setHeaders({
+                'Content-Type': 'text/xml',
+                'Accept': 'text/xml'
+            });
+        } else {
+            me.setHeaders({
+                'Content-Type': 'application/json',
+                'Accept': 'application/json'
+            });
+        }
+    },
+    
+    /**
+     * @private
+     */
+    addRequestMethod: function(name, model) {
+        var me = this;
+        
+        me[name] = (function(methodName, paramsModel) {
+            return function() {
+                var requestParams = null;
+                var rawParams;
+                var fieldsSortOrder = null;
+                var callback = Ext.emptyFn();
+                var args = Ext.clone(arguments);
+                
+                // Extract callback and parameters from arguments
+                for (var i in arguments) {
+                    if (Ext.isFunction(arguments[i])) {
+                        callback = arguments[i];
+                    } else {
+                        if (!rawParams) {
+                            if (Ext.isArray(arguments[i]) || 
+                                Ext.isPrimitive(arguments[i])) {
+                                rawParams = [];
+                            } else {
+                                rawParams = {};
+                            }
+                        }
+                        
+                        if (Ext.isArray(rawParams)) {
+                            if (Ext.isArray(arguments[i])) {
+                                rawParams = rawParams.concat(arguments[i]);
+                            }
+                            if (Ext.isPrimitive(arguments[i])) {
+                                rawParams.push(arguments[i]);
+                            }
+                            if (Ext.isObject(arguments[i])) {
+                                for (var y in arguments[i]) {
+                                    rawParams.push(arguments[i][y]);
+                                }
+                            }
+                        } else {
+                            if (Ext.isObject(arguments[i])) {
+                                Ext.apply(rawParams, arguments[i]);
+                            }
+                        }
+                    }
+                }
+                                
+                requestParams = rawParams;
+                
+                // Extract fieldsSortOrder from parameters
+                if (Ext.isObject(requestParams) && 
+                    Ext.isDefined(requestParams.fieldsSortOrder)) {
+                    
+                    fieldsSortOrder = requestParams.fieldsSortOrder;
+                }
+                
+                var model = Ext.data.ModelManager.getModel(paramsModel);
+                
+                // Validate parameters if model is defined
+                if (model) {
+                    var model = Ext.create(model, requestParams);
+                    var errors = model.validate();
+                    if (!errors.isValid()) {
+                        var message = [];
+
+                        for (var i in errors.items) {
+                            var error = errors.items[i];
+                            message.push('"' + error.getField() + '" ' + 
+                                         error.getMessage());
+                        }
+                        
+                        me.fireEvent('exception', {
+                            title: 'Error while remote procedure calling',
+                            message: 'Wrong parameters!</br>' + message.join(''),
+                            time: new Date()
+                        });
+                        return;
+                    } else {
+                        requestParams = model.getData();
+                    }
+                }
+                
+                // If id not defined in model directly 
+                // we should remove model internal id from parameters
+                if (model && model.internalId === model.getId()) {
+                    delete requestParams['id'];
+                }
+                
+                var actionCfg = {
+                    method: methodName,
+                    callback: callback
+                };
+                
+                if (Ext.isDefined(requestParams)) {
+                    
+                    // If fieldsSortOrder is defined we should convert
+                    // named parameters object to sorted array (by order pos)
+                    if (fieldsSortOrder && Ext.isArray(fieldsSortOrder)) {
+                        var sorted = [];
+                        for (var i in fieldsSortOrder) {
+                            if (fieldsSortOrder[i] in requestParams) {
+                                sorted.push(requestParams[fieldsSortOrder[i]]);
+                            }                            
+                        }
+                        requestParams = sorted;
+                    }                    
+                    
+                    Ext.apply(actionCfg, {
+                        params: requestParams
+                    })
+                }
+                
+                // Do request to remote server
+                me.request(actionCfg);
+            };
+        })(name, model);
+    },
+    
+    /**
+     * Remote api
+     * @private
+     * @param {Object} api Remote api config object
+     */
+    applyApi: function(api) {
+        var me = this;
+        
+        if (!Ext.isArray(api)) {
+            me.fireEvent('exception', {
+                title: 'Configuration error',
+                message: 'Wrong api configuration',
+                time: new Date()
+            });            
+            return null;
+        } else {
+            for (var i in api) {
+                var method = api[i];
+                
+                // Name must be defined for remote procedure
+                if (!Ext.isDefined(method['name'])) {
+                    me.fireEvent('exception', {
+                        title: 'Configuration error',
+                        message: 'Wrong remote procedure configuration. ' +
+                                 'Procedure name not defined!',
+                        time: new Date()
+                    });
+                    return null;
+                } else {
+                    var model = null;
+                    
+                    // Validate the configuration of parameters for remote procedure
+                    // Before all, check for model configuration
+                    if (Ext.isDefined(method['model'])) {
+                        model = method['model'];
+                        
+                        if (!Ext.data.ModelManager.getModel(method['model'])) {
+                            me.fireEvent('exception', {
+                                title: 'Configuration error',
+                                message: 'Wrong remote procedure configuration. ' +
+                                         'Model for "' + method['name'] + '" not found!',
+                                time: new Date()
+                            });
+                            return null;
+                        }
+                    } else {
+                        
+                        // If model not defined we create one
+                        // but check for parameters configuration before
+                        if (Ext.isDefined(method['params']) && 
+                            method['params'] !== null) {
+                            model = 'RP' + method['name'] + 'Params';
+                            Ext.define(model, {
+                                extend: 'Ext.data.Model',
+                                config: {
+                                    fields: method['params'],
+                                    validations: method['validations'] || null
+                                }
+                            });
+                        } 
+                    }
+                    
+                    // Build local callback for remote procedure
+                    me.addRequestMethod(method['name'], model);
+                }
+            }
+        }
+        
+        return api;
+    },
+    
+    /**
+     * Response hooks for remote api methods
+     * @private
+     * @param {Object} apiHooks Object with apiHooks methods config
+     */
+    applyHooks: function(apiHooks) {
+        var me = this;
+        
+        if (!Ext.isObject(apiHooks)) {
+            me.fireEvent('exception', {
+                title: 'Configuration error',
+                message: 'Wrong hooks configuration',
+                time: new Date()
+            });            
+            return null;
+        } else {
+            for (var i in apiHooks) {
+                if (Ext.isFunction(apiHooks[i])) {
+                    me.requestsHooks.add(i, apiHooks[i]);
+                }
+            }
+        }
+        
+        return apiHooks;
+    },
+    
+    /**
+     * Default error callback
+     * @private
+     * @param {Function} onError
+     */
+    applyError: function(onError) {
+        if (!Ext.isFunction(onError)) {
+            return function(err) {
+                
+                // <debug>
+                console.log('RPC client error:', err.message);
+                // </debug>
+            };
+        } else {
+            return onError;
+        }
     },
     
     /**
@@ -274,37 +893,12 @@ Ext.define('Ext.ux.data.Jsonrpc', {
     
     /**
      * Get request object by id
+     * @private
+     * @param {String} is Request Id
      * @return {Object} The request object
      */
     getRequest: function(id) {
         return this.requests.get(id);
-    },
-    
-    /**
-     * Verify is callback for remote procedure was defined
-     */
-    isCallbackDefined: function(config) {
-        var api = this.getApi();
-        
-        if (Ext.isDefined(config.method) && 
-            !Ext.isFunction(api[config.method])) {
-            
-            // <debug>
-            if (Ext.isDefined(config.id) && config.id !== null) {
-                this.fireEvent('exception', {
-                    title: 'Configuration error',
-                    message: 'Callback for remote procedure [' + 
-                             config.method + 
-                             '] not defined!',
-                    time: new Date()
-                });
-            }   
-            // </debug>
-            
-            return false;
-        } else {
-            return true;
-        }
     },
     
     /**
@@ -318,22 +912,21 @@ Ext.define('Ext.ux.data.Jsonrpc', {
         var idPart = {};
         
         config.scope = config.scope || me.getScope();
-        
-        // Generate unique Id for request
-        uuid = me.uuid.generate();
-        
+        config.callback = config.callback || Ext.emptyFn;
+                
         // Do not set Id for notice requests (with id === null)
         // @todo Validate request Id to be String or number without fractional parts
         if (Ext.isDefined(config.id) && config.id !== null) {
             idPart = {id: config.id};
         } else if (!Ext.isDefined(config.id)) {
+            
+            // Generate unique Id for request
+            uuid = me.uuid.generate();
             idPart = {id: uuid};
         }
         
-        // Register requests with enabled callback
-        if (me.isCallbackDefined(config)) {
-            me.registerRequest(uuid, config);
-        }
+        // Register requests 
+        me.registerRequest(uuid, config);
         
         // Add params property if non empty only
         if (Ext.isDefined(config.params) && config.params !== null) {
@@ -341,11 +934,28 @@ Ext.define('Ext.ux.data.Jsonrpc', {
                 params: config.params
             })
         }
-                
-        return Ext.encode(Ext.apply({
-            jsonrpc: '2.0',
-            method: config.method            
-        }, idPart));
+        
+        if (me.getProtocol() === 'XML-RPC') {
+            var xml = ['<methodCall><methodName>' + config.method + '</methodName>'];
+            if (Ext.isDefined(idPart.id)) {
+                xml.push('<id>' + idPart.id + '</id>');
+            }
+            
+            if(config.params){
+                xml.push('<params>');
+                for (var i in config.params) {
+                    xml.push('<param>' + me.toXmlRpc(config.params[i]) + '</param>');
+                }                    
+                xml.push('</params>');
+            }
+            xml.push('</methodCall>');
+            return xml.join('');
+        } else {
+            return Ext.encode(Ext.apply({
+                jsonrpc: '2.0',
+                method: config.method            
+            }, idPart));
+        }
     },
     
     /**
@@ -353,40 +963,44 @@ Ext.define('Ext.ux.data.Jsonrpc', {
      * @private
      */    
     processResult: function(result) {
-        var self = this;
-        var api = self.getApi();
+        var me = this;
         
         if (Ext.isDefined(result.error)) {
 
             // We got error mesage from server
             result.error.title = 'Server message';
-            self.fireEvent('exception', result.error);
+            me.fireEvent('exception', result.error);
             return;
         }
         
         // Get registered request from collection
-        var registered = self.getRequest(result.id);
+        var registered = me.getRequest(result.id);
         
         if (Ext.isDefined(registered)) {
             
             // Work with non-empty results only
             if (Ext.isDefined(result.result) && 
-                self.fireEvent('beforeresult', result) !== false) {
-
-                api[registered.method].apply(registered.scope || 
-                                             self.getScope(), 
-                                             [result.result]);
+                me.fireEvent('beforeresult', result) !== false) {
+                
+                // Apply hook
+                if (me.requestsHooks.containsKey(registered.method)) {
+                    result.result = me.requestsHooks.getByKey(registered.method).apply(me, [result.result]);
+                }
+                
+                registered.callback.apply(registered.scope || 
+                                          me.getScope(), 
+                                          [result.result]);
             }
             
             // Unregister processed request
-            self.removeRequest(result.id);
+            me.removeRequest(result.id);
         } else {
             
             // @todo Move msg about undefined callback to debug on production
-            self.fireEvent('exception', {
+            me.fireEvent('exception', {
                 title: 'Request error',
                 message: 'Server response contains unregistered request ID ' + 
-                         'or notice request filed!',
+                         'or request with notice type is filed!',
                 time: new Date()
             });
         }
@@ -407,7 +1021,7 @@ Ext.define('Ext.ux.data.Jsonrpc', {
             me.on({
                 single: true,
                 initialized: function() {
-                    me.requset.apply(me, requestsArgs);
+                    me.request.apply(me, requestsArgs);
                 }
             });
             
@@ -444,14 +1058,26 @@ Ext.define('Ext.ux.data.Jsonrpc', {
             parsedRequest += item.request;
             
             if (index < length - 1) {
-                parsedRequest += ',';
+                
+                // Add batch separator for JSON requests only
+                if (me.getProtocol() === 'JSON-RPC') {
+                    parsedRequest += ',';
+                }
             }
         });
         
         // Update batch wrapper
         if (requests.getCount() > 1) {
-            batchPrefix = '[';
-            batchPostfix = ']'
+            if (me.getProtocol() === 'XML-RPC') {
+                
+                // @note !!! This type of batch request does not meet official XML-RPC spec
+                // you can get exception with third party XML-RPC servers !!!
+                batchPrefix = '<batch>';
+                batchPostfix = '</batch>'
+            } else {
+                batchPrefix = '[';
+                batchPostfix = ']'
+            }
         }
         
         if (requests.getCount() > 0) {
@@ -459,16 +1085,70 @@ Ext.define('Ext.ux.data.Jsonrpc', {
             var requestConfig = {
                 url: me.getUrl(),
                 method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'Accept': 'application/json'
-                },
+                headers: Ext.apply(me.getHeaders(), me.getExtraHeaders()),
                 timeout: me.getTimeout(),
-                jsonData: batchPrefix + parsedRequest + batchPostfix,
                 success: function(response, opts) {
+                    var result;
+                    
                     try {
-                        var result = Ext.decode(response.responseText);
+                        if (me.getProtocol() === 'XML-RPC') {
+                            var doc = response.responseXML.documentElement;
+                            if(doc.nodeName !== 'methodResponse' && 
+                               doc.nodeName !== 'batch') {
+                                throw Error("Invalid XML-RPC document.");
+                            }
+                            
+                            var fault = doc.getElementsByTagName('fault');
+                            
+                            if (fault.length > 0) {
+                                if (fault[0].firstChild && 
+                                    fault[0].firstChild.nodeName === 'value') {
+                                    
+                                    // Extract error message from server response
+                                    var faultResult = me.parseXmlRpc(fault[0].firstChild);
+                                    
+                                    if (Ext.isDefined(faultResult.faultCode) && 
+                                        Ext.isDefined(faultResult.faultString)) {
+                                        
+                                        // Build error object for result 
+                                        result = {
+                                            error: {
+                                                code: faultResult.faultCode,
+                                                message: faultResult.faultString
+                                            }
+                                        };
+                                    } else {
+                                        throw Error("Invalid XML-RPC fault response.");
+                                    }
+                                } else {
+                                    throw Error("Invalid XML-RPC fault response.");
+                                }
+                                
+                            } else {
+                                if (doc.nodeName === 'batch') {
+                                    var responses = doc.getElementsByTagName('methodResponse');
+                                    result = [];
 
+                                    for (var i in responses) {
+                                        if (Ext.isDefined(responses[i].nodeName)) {
+                                            var valueEl = me.extractXmlRpcValueEl(responses[i]);
+                                            if (valueEl !== undefined) {
+                                                result.push(me.parseXmlRpc(valueEl));
+                                            }                                        
+                                        }                                    
+                                    }
+
+                                } else {
+                                    var valueEl = me.extractXmlRpcValueEl(doc);
+                                    if(valueEl !== undefined) {
+                                        result = me.parseXmlRpc(valueEl);
+                                    }
+                                } 
+                            }
+                        } else {
+                            result = Ext.decode(response.responseText);
+                        }
+                        
                         if (Ext.isArray(result)) {
                             for (var i in result) {
                                 me.processResult(result[i]);
@@ -476,6 +1156,7 @@ Ext.define('Ext.ux.data.Jsonrpc', {
                         } else {
                             me.processResult(result);
                         }
+                        
                     } catch(err) {
                         me.fireEvent('exception', err);
                     }
@@ -490,6 +1171,18 @@ Ext.define('Ext.ux.data.Jsonrpc', {
                     });
                 }
             };
+            
+            parsedRequest = batchPrefix + parsedRequest + batchPostfix;
+            
+            if (me.getProtocol() === 'XML-RPC') {
+                Ext.apply(requestConfig, {
+                    xmlData: '<?xml version="1.0"?>' + parsedRequest
+                });
+            } else {
+                Ext.apply(requestConfig, {
+                    jsonData: parsedRequest
+                });
+            }
             
             // Request hooks is a feature for injecting 
             // extra common parameters to requestConfig
@@ -508,14 +1201,13 @@ Ext.define('Ext.ux.data.Jsonrpc', {
      */
     onException: function(err) {
         var me = this;
-        var api = me.getApi();
         
-        if (Ext.isFunction(api['error'])) {
+        if (Ext.isFunction(me.getError())) {
             if (!Ext.isDefined(err.title)) {
                 err.title = 'Exception';
             }
             
-            api['error'].apply(me, [err]);
+            me.getError().apply(me, [err]);
         }
     }
 

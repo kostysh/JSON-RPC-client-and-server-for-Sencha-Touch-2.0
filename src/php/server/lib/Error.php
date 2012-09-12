@@ -13,12 +13,9 @@
  * @requires PHP 5.3
  */
 
-const CUSTOM_SEND_ERROR_SOURCE = false;
-
 class Error {
     protected $code;
     protected $message;
-    protected $source;
     protected $time;
     
     // @todo log errors
@@ -33,14 +30,7 @@ class Error {
         }
         
         $this->code = $code;
-        $this->message = $message;
-        
-        if (CUSTOM_SEND_ERROR_SOURCE) {
-            $this->source = $source;
-        } else {
-            $this->source = null;
-        }
-        
+        $this->message = $message;        
         $this->time = time();
     }
     
@@ -52,15 +42,10 @@ class Error {
         return $this->message;
     }
     
-    public function getSource() {
-        return $this->source;
-    }
-    
     public function getAll() {
         $exception = new stdClass();
         $exception->code = $this->code;
         $exception->message = $this->message;
-        $exception->source = $this->source;
         $exception->time = $this->time;
         return $exception;
     }
