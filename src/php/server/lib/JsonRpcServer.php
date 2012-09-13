@@ -149,7 +149,9 @@ class jsonRPC {
                 $response = $this->invokeMethod($request->getMethod(), $request->getParams());
                 if (!$request->isNotify()) {
                     $request->result = $response;
+                    
                     $this->response->setPart(array('result' => $response), $request->getId());
+                    
                 }                
             } catch (Exception $e) {
                 $error = new Error(ERROR_SERVER_ERROR, $e->getMessage(), $request);

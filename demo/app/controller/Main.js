@@ -57,8 +57,7 @@ Ext.define('Jsonrpc.controller.Main', {
             scope: me,
             api: [
                 {
-                    name: 'getFields',
-                    params: null // or simply do not define
+                    name: 'getFields'
                 },
                 {
                     name: 'saveFields',
@@ -130,11 +129,6 @@ Ext.define('Jsonrpc.controller.Main', {
                 message: result
             });
         });
-        
-//        this.jsonRPC.request({
-//            method: 'saveFields',
-//            params: form.getValues()
-//        });
     },
     
     onGetBtnTap: function() {
@@ -142,12 +136,7 @@ Ext.define('Jsonrpc.controller.Main', {
         
         me.jsonRPC.getFields(function(fields) {
             me.getForm().setValues(fields);
-        });
-        
-        
-//        this.jsonRPC.request({
-//            method: 'getFields'
-//        });        
+        });        
     },
     
     onErrBtnTap: function() {
@@ -188,7 +177,7 @@ Ext.define('Jsonrpc.controller.Main', {
                 batchOrder: 2,
                 callback: function() {
                     Ext.device.Notification.show({
-                        title: 'Done',
+                        title: 'Success',
                         message: 'Comments in console'
                     });
                 }

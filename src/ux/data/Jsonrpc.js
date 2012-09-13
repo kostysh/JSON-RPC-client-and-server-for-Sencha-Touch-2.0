@@ -5,7 +5,7 @@
  * @fileOverview JSON-RPC spec. version 2.0 conformed client for Sencha Touch
  *
  * @author Constantine V. Smirnov kostysh(at)gmail.com
- * @date 20120912
+ * @date 20120913
  * @version 2.1 Beta
  * @license GNU GPL v3.0
  * 
@@ -30,12 +30,11 @@
         // Remote API definition
         api: [
             {
-                name: 'getFields',
-                params: null // or simply do not define
+                name: 'getFields'
             },
             {
                 name: 'saveFields',
-                model: 'Jsonrpc.model.SaveFields'// Ext.data.Model config 
+                model: 'Jsonrpc.model.SaveFields'// Ext.data.Model config for parameters fields 
             }
         ],
 
@@ -178,6 +177,12 @@ Ext.define('Ext.ux.data.Jsonrpc', {
     uuid: null,
     
     /**
+     * Remote methods local aliases collection
+     * @private
+     */
+    aliases: {},
+    
+    /**
      * Requests collection
      * @private
      */
@@ -245,6 +250,9 @@ Ext.define('Ext.ux.data.Jsonrpc', {
         // Requests hooks collection
         me.requestsHooks = Ext.create('Ext.util.MixedCollection');
         
+        // Methods aliases collection
+        me.aliases = Ext.create('Ext.util.MixedCollection');
+        
         // UUID generator setup
         me.uuid = Ext.create('Ext.data.identifier.Uuid');
         
@@ -273,6 +281,18 @@ Ext.define('Ext.ux.data.Jsonrpc', {
             scope: me,
             exception: me.onException
         });
+    },
+    
+    /**
+     * @private
+     */
+    getMethodNameByAlias: function(alias) {
+        var method = this.aliases.getByKey(alias);
+        if (method) {
+            return method;
+        } else {
+            return alias;
+        }
     },
     
     /**
@@ -752,7 +772,7 @@ Ext.define('Ext.ux.data.Jsonrpc', {
                 }
                 
                 var actionCfg = {
-                    method: methodName,
+                    method: me.getMethodNameByAlias(methodName),// Convert alias to real method name
                     callback: callback
                 };
                 
@@ -796,59 +816,76 @@ Ext.define('Ext.ux.data.Jsonrpc', {
                 time: new Date()
             });            
             return null;
-        } else {
-            for (var i in api) {
-                var method = api[i];
-                
-                // Name must be defined for remote procedure
-                if (!Ext.isDefined(method['name'])) {
+        } 
+            
+        for (var i in api) {
+            var method = api[i];
+
+            // Name must be defined for remote procedure
+            if (!Ext.isDefined(method['name'])) {
+                me.fireEvent('exception', {
+                    title: 'Configuration error',
+                    message: 'Wrong remote procedure configuration. ' +
+                             'Procedure name not defined!',
+                    time: new Date()
+                });
+                return null;
+            }
+
+            var model = null;
+
+            // Validate the configuration of parameters for remote procedure
+            // Before all, check for model configuration
+            if (Ext.isDefined(method['model'])) {
+                model = method['model'];
+
+                if (!Ext.data.ModelManager.getModel(method['model'])) {
                     me.fireEvent('exception', {
                         title: 'Configuration error',
                         message: 'Wrong remote procedure configuration. ' +
-                                 'Procedure name not defined!',
+                                 'Model for "' + method['name'] + '" not found!',
                         time: new Date()
                     });
                     return null;
-                } else {
-                    var model = null;
-                    
-                    // Validate the configuration of parameters for remote procedure
-                    // Before all, check for model configuration
-                    if (Ext.isDefined(method['model'])) {
-                        model = method['model'];
-                        
-                        if (!Ext.data.ModelManager.getModel(method['model'])) {
-                            me.fireEvent('exception', {
-                                title: 'Configuration error',
-                                message: 'Wrong remote procedure configuration. ' +
-                                         'Model for "' + method['name'] + '" not found!',
-                                time: new Date()
-                            });
-                            return null;
-                        }
-                    } else {
-                        
-                        // If model not defined we create one
-                        // but check for parameters configuration before
-                        if (Ext.isDefined(method['params']) && 
-                            method['params'] !== null) {
-                            model = 'RP' + method['name'] + 'Params';
-                            Ext.define(model, {
-                                extend: 'Ext.data.Model',
-                                config: {
-                                    fields: method['params'],
-                                    validations: method['validations'] || null
-                                }
-                            });
-                        } 
-                    }
-                    
-                    // Build local callback for remote procedure
-                    me.addRequestMethod(method['name'], model);
                 }
+            } else {
+
+                // If model not defined we create one
+                // but check for parameters configuration before
+                if (Ext.isDefined(method['params']) && 
+                    method['params'] !== null) {
+                    model = 'RP' + method['name'] + 'Params';
+                    Ext.define(model, {
+                        extend: 'Ext.data.Model',
+                        config: {
+                            fields: method['params'],
+                            validations: method['validations'] || null
+                        }
+                    });
+                } 
             }
+            
+            // @todo Add alias validation
+            if (method['name'].indexOf('.') !== -1 && 
+                !Ext.isDefined(method['alias'])) {
+                
+                me.fireEvent('exception', {
+                    title: 'Configuration error',
+                    message: 'Alias for method "' + method['name'] + '" not defined!',
+                    time: new Date()
+                });
+                return null;
+            }
+
+            // Build local callback for remote procedure
+            if (Ext.isDefined(method['alias'])) {
+                me.aliases.add(method['alias'], method['name']);// Register alias                
+                me.addRequestMethod(method['alias'], model);
+            } else {
+                me.addRequestMethod(method['name'], model);
+            }            
         }
-        
+                
         return api;
     },
     
@@ -983,12 +1020,20 @@ Ext.define('Ext.ux.data.Jsonrpc', {
                 xml.push('</params>');
             }
             xml.push('</methodCall>');
-            return xml.join('');
+            
+            return {
+                id: idPart.id,
+                request: xml.join('')
+            };
+            
         } else {
-            return Ext.encode(Ext.apply({
-                jsonrpc: '2.0',
-                method: config.method            
-            }, idPart));
+            return {
+                id: idPart.id,
+                request: Ext.encode(Ext.apply({
+                    jsonrpc: '2.0',
+                    method: config.method            
+                }, idPart))
+            };
         }
     },
     
@@ -1047,6 +1092,7 @@ Ext.define('Ext.ux.data.Jsonrpc', {
     request: function() {
         var me = this;
         var requestsArgs = Ext.clone(arguments);
+        var xmlrpcRequestId;
         
         
         if (!me.initialized) {
@@ -1062,7 +1108,7 @@ Ext.define('Ext.ux.data.Jsonrpc', {
             return;
         }
         
-        // Temporary builded requests collection
+        // Temporary requests collection 
         var requests = Ext.create('Ext.util.MixedCollection'); 
         
         // Default batch wrapper
@@ -1077,9 +1123,17 @@ Ext.define('Ext.ux.data.Jsonrpc', {
                 
                 // Add builded request to collection
                 requests.add(requests.getCount() + 1, {
-                    request: request,
+                    id: request.id,
+                    request: request.request,
                     batch: arguments[i].batchOrder || 0
                 });
+                
+                // Official XML-RPC does not support batch requests in JSON-RPC sense
+                // so in most cases regular XML-RPC request will be single
+                // We should remember request id for server response identification
+                if (me.getProtocol() === 'XML-RPC') {
+                    xmlrpcRequestId = request.id;
+                }
             }                
         }
         
@@ -1123,6 +1177,7 @@ Ext.define('Ext.ux.data.Jsonrpc', {
                 timeout: me.getTimeout(),
                 success: function(response, opts) {
                     var result;
+                    var batch = false;
                     
                     try {
                         if (me.getProtocol() === 'XML-RPC') {
@@ -1135,11 +1190,11 @@ Ext.define('Ext.ux.data.Jsonrpc', {
                             var fault = doc.getElementsByTagName('fault');
                             
                             if (fault.length > 0) {
-                                if (fault[0].firstChild && 
-                                    fault[0].firstChild.nodeName === 'value') {
+                                if (fault[0].firstElementChild && 
+                                    fault[0].firstElementChild.nodeName === 'value') {
                                     
                                     // Extract error message from server response
-                                    var faultResult = me.parseXmlRpc(fault[0].firstChild);
+                                    var faultResult = me.parseXmlRpc(fault[0].firstElementChild);
                                     
                                     if (Ext.isDefined(faultResult.faultCode) && 
                                         Ext.isDefined(faultResult.faultString)) {
@@ -1160,6 +1215,7 @@ Ext.define('Ext.ux.data.Jsonrpc', {
                                 
                             } else {
                                 if (doc.nodeName === 'batch') {
+                                    batch = true;
                                     var responses = doc.getElementsByTagName('methodResponse');
                                     result = [];
 
@@ -1167,23 +1223,61 @@ Ext.define('Ext.ux.data.Jsonrpc', {
                                         if (Ext.isDefined(responses[i].nodeName)) {
                                             var valueEl = me.extractXmlRpcValueEl(responses[i]);
                                             if (valueEl !== undefined) {
-                                                result.push(me.parseXmlRpc(valueEl));
+                                                var parsed = me.parseXmlRpc(valueEl);
+                                                
+                                                if (Ext.isObject(parsed) && 
+                                                    Ext.isDefined(parsed['result'])) {
+                                                    
+                                                    // We got right result
+                                                    result.push(parsed);
+                                                } else {
+                                                     
+                                                    // Convert XML-RPC response 
+                                                    // to JSON-RPC response type
+                                                    result.push({
+                                                        id: xmlrpcRequestId || null,
+                                                        result: parsed
+                                                    });
+                                                }
                                             }                                        
                                         }                                    
                                     }
 
                                 } else {
                                     var valueEl = me.extractXmlRpcValueEl(doc);
+                                    
                                     if(valueEl !== undefined) {
-                                        result = me.parseXmlRpc(valueEl);
+                                        var parsed = me.parseXmlRpc(valueEl);
+                                        
+                                        if (Ext.isObject(parsed) && 
+                                            Ext.isDefined(parsed['result'])) {
+
+                                            // We got right result
+                                            result = parsed;
+                                        } else {
+
+                                            // Convert XML-RPC response 
+                                            // to JSON-RPC response type
+                                            result = {
+                                                id: xmlrpcRequestId || null,
+                                                result: parsed
+                                            };
+                                        }
                                     }
                                 } 
                             }
                         } else {
                             result = Ext.decode(response.responseText);
+                            
+                            if (Ext.isArray(result) && 
+                                result.length > 1 && 
+                                Ext.isDefined(result[1]['result'])) {
+                                
+                                batch = true;
+                            }
                         }
                         
-                        if (Ext.isArray(result)) {
+                        if (batch && Ext.isArray(result)) {
                             for (var i in result) {
                                 me.processResult(result[i]);
                             }
@@ -1193,6 +1287,9 @@ Ext.define('Ext.ux.data.Jsonrpc', {
                         
                     } catch(err) {
                         me.fireEvent('exception', err);
+                        // <debug>
+                        console.log('Error', err);
+                        // </debug>
                     }
                 },
                 failure: function(response, opts) {
