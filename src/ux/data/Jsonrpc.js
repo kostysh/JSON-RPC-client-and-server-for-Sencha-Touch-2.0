@@ -1116,7 +1116,7 @@ Ext.define('Ext.ux.data.Jsonrpc', {
         var batchPostfix = '';
         
         // Build each request config from arguments
-        for (var i in arguments) {
+        for (var i=0; i < arguments.length; i++) {
             var request = me.buildRequest(arguments[i]);
             
             if (request) {
