@@ -5,7 +5,7 @@
  * @fileOverview JSON-RPC spec. version 2.0 conformed client for Sencha Touch
  *
  * @author Constantine V. Smirnov kostysh(at)gmail.com
- * @date 20120913
+ * @date 20120914
  * @version 2.1 Beta
  * @license GNU GPL v3.0
  * 
@@ -48,25 +48,20 @@
                     console.log('Server response: ', result);
                 }
                 // </debug>
-
-                return result;
-            },
-            saveFields: function(result) {
-
-                // <debug>
-                console.log('Server response: ', result);
-                // </debug>
-
+                
+                // Doing something with result and...
+                
                 return result;
             }
         },
         
-        // Default exception handler
+        // Default client exception handler (not failures)
         error: function(err) {
-            Ext.device.Notification.show({
-                title: err.title || 'Fail!',
-                message: err.message || 'Unknown error'
-            });
+            // <debug>
+            if (Ext.isObject(result)) {
+                console.log('Error: ', err);
+            }
+            // </debug>
         }
     });
         
@@ -90,8 +85,13 @@
             method: 'saveFields',
             params: form.getValues(),
             batchOrder: 2,
-            callback: function(result) {
-                console.log('Server response: ', result);
+            callbacks: {
+                success: function(result) {
+                    console.log('Success response: ', result);
+                },
+                failure: function() {
+                    console.log('Failure response: ', result);
+                }
             }
         },
         {
@@ -113,10 +113,14 @@
         },
         scope: this, // Scope for callback (optional)
         batchOrder: 1,// Batch sorting order (optional), for batch requests only
-        callback: function() {
-            // Method callback (optional)
-            // ...
-        } 
+        callbacks: { // optional
+            success: function() {
+                // ...
+            },
+            failure: function() {
+                // ...
+            }
+        }
     }
  
  */
@@ -238,26 +242,7 @@ Ext.define('Ext.ux.data.Jsonrpc', {
      */
     constructor: function(config) {
         var me = this;
-        
-        // Build connection instance
-        me.connection = Ext.create('Ext.data.Connection', {
-            useDefaultXhrHeader: false
-        });
-        
-        // Requests collection
-        me.requests = Ext.create('Ext.util.MixedCollection');
-        
-        // Requests hooks collection
-        me.requestsHooks = Ext.create('Ext.util.MixedCollection');
-        
-        // Methods aliases collection
-        me.aliases = Ext.create('Ext.util.MixedCollection');
-        
-        // UUID generator setup
-        me.uuid = Ext.create('Ext.data.identifier.Uuid');
-        
-        me.initConfig(config);
-        
+        me.initConfig(config);        
         me.fireAction('beforeinitialized', [me], me.setInitialized);
     },
     
@@ -275,6 +260,23 @@ Ext.define('Ext.ux.data.Jsonrpc', {
      */
     beforeInitConfig: function() {
         var me = this;
+        
+        // Build connection instance
+        me.connection = Ext.create('Ext.data.Connection', {
+            useDefaultXhrHeader: false
+        });
+        
+        // Requests collection
+        me.requests = Ext.create('Ext.util.MixedCollection');
+        
+        // Requests hooks collection
+        me.requestsHooks = Ext.create('Ext.util.MixedCollection');
+        
+        // Methods aliases collection
+        me.aliases = Ext.create('Ext.util.MixedCollection');
+        
+        // UUID generator setup
+        me.uuid = Ext.create('Ext.data.identifier.Uuid');
         
         // Subscribe to client exception event
         me.on({
@@ -484,16 +486,10 @@ Ext.define('Ext.ux.data.Jsonrpc', {
                         return typeEL.firstChild.nodeValue;
                     
                     case 'datetime.iso8601':
-                        var matches, date = new Date(0);
+                        var matches; 
+                        var date = Ext.Date.parse(typeEL.firstChild.nodeValue, "YndTH:i:s");
                         
-                        if (matches = typeEL.firstChild.nodeValue.match(/^(?:(\d\d\d\d)-(\d\d)(?:-(\d\d)(?:T(\d\d)(?::(\d\d)(?::(\d\d)(?:\.(\d+))?)?)?)?)?)$/)){
-                            if(matches[1]) date.setUTCFullYear(parseInt(matches[1]));
-                            if(matches[2]) date.setUTCMonth(parseInt(matches[2]-1));
-                            if(matches[3]) date.setUTCDate(parseInt(matches[3]));
-                            if(matches[4]) date.setUTCHours(parseInt(matches[4]));
-                            if(matches[5]) date.setUTCMinutes(parseInt(matches[5]));
-                            if(matches[6]) date.setUTCMilliseconds(parseInt(matches[6]));
-                            
+                        if (Ext.isDate(date)) {
                             return date;
                         }
                         
@@ -685,25 +681,44 @@ Ext.define('Ext.ux.data.Jsonrpc', {
     /**
      * @private
      */
-    addRequestMethod: function(name, model) {
+    addRequestMethod: function(name, model, defaults) {
         var me = this;
         
-        me[name] = (function(methodName, paramsModel) {
+        me[name] = (function(methodName, paramsModel, defaultParams) {
             return function() {
                 var requestParams = null;
                 var rawParams;
                 var fieldsSortOrder = null;
-                var callback = Ext.emptyFn();
+                var callbacks = {
+                    scope: me,
+                    success: Ext.emptyFn(),
+                    failure: Ext.emptyFn()
+                };
                 var args = Ext.clone(arguments);
                 
                 // Extract callback and parameters from arguments
-                for (var i in arguments) {
-                    if (Ext.isFunction(arguments[i])) {
-                        callback = arguments[i];
+                for (var i=0; i<arguments.length; i++) {
+                    var arg = arguments[i];
+                    
+                    if (Ext.isFunction(arg) || 
+                        (Ext.isObject(arg) && 
+                         (Ext.isDefined(arg['success']) || 
+                          Ext.isDefined('failure')))) {
+                        
+                        if (Ext.isFunction(arg)) {
+                            callbacks.success = arg;
+                        } else {
+                            callbacks = {
+                                scope: arg['scope'] || me,
+                                success: Ext.isFunction(arg['success']) ? arg['success'] : Ext.emptyFn(),
+                                failure: Ext.isFunction(arg['failure']) ? arg['failure'] : Ext.emptyFn()
+                            };
+                        }
+                        
                     } else {
                         if (!rawParams) {
-                            if (Ext.isArray(arguments[i]) || 
-                                Ext.isPrimitive(arguments[i])) {
+                            if (Ext.isArray(arg) || 
+                                Ext.isPrimitive(arg)) {
                                 rawParams = [];
                             } else {
                                 rawParams = {};
@@ -711,23 +726,41 @@ Ext.define('Ext.ux.data.Jsonrpc', {
                         }
                         
                         if (Ext.isArray(rawParams)) {
-                            if (Ext.isArray(arguments[i])) {
-                                rawParams = rawParams.concat(arguments[i]);
+                            if (Ext.isArray(arg)) {
+                                rawParams = rawParams.concat(arg);
                             }
-                            if (Ext.isPrimitive(arguments[i])) {
-                                rawParams.push(arguments[i]);
+                            if (Ext.isPrimitive(arg)) {
+                                rawParams.push(arg);
                             }
-                            if (Ext.isObject(arguments[i])) {
-                                for (var y in arguments[i]) {
-                                    rawParams.push(arguments[i][y]);
+                            if (Ext.isObject(arg)) {
+                                for (var y in arg) {
+                                    rawParams.push(arg[y]);
                                 }
                             }
                         } else {
-                            if (Ext.isObject(arguments[i])) {
-                                Ext.apply(rawParams, arguments[i]);
+                            if (Ext.isObject(arg)) {
+                                Ext.apply(rawParams, arg);
                             }
                         }
                     }
+                }
+                
+                if (Ext.isDefined(defaultParams)) {
+                                        
+                    // Build object with default parameters
+                    var parameters = {};
+                    for (var y in defaultParams) {
+                        
+                        if (defaultParams.hasOwnProperty(y) && 
+                            Ext.isDefined(me[defaultParams[y]]) && 
+                            Ext.isFunction(me[defaultParams[y]])) {
+                            
+                            parameters[y] = me[defaultParams[y]].call(me);
+                        }
+                    }                    
+                    
+                    // Apply defaults with rawParameters (from arguments)
+                    rawParams = Ext.apply(parameters, rawParams);
                 }
                                 
                 requestParams = rawParams;
@@ -773,7 +806,7 @@ Ext.define('Ext.ux.data.Jsonrpc', {
                 
                 var actionCfg = {
                     method: me.getMethodNameByAlias(methodName),// Convert alias to real method name
-                    callback: callback
+                    callbacks: callbacks
                 };
                 
                 if (Ext.isDefined(requestParams)) {
@@ -798,7 +831,7 @@ Ext.define('Ext.ux.data.Jsonrpc', {
                 // Do request to remote server
                 me.request(actionCfg);
             };
-        })(name, model);
+        })(name, model, defaults);
     },
     
     /**
@@ -820,7 +853,7 @@ Ext.define('Ext.ux.data.Jsonrpc', {
             
         for (var i in api) {
             var method = api[i];
-
+            
             // Name must be defined for remote procedure
             if (!Ext.isDefined(method['name'])) {
                 me.fireEvent('exception', {
@@ -876,13 +909,13 @@ Ext.define('Ext.ux.data.Jsonrpc', {
                 });
                 return null;
             }
-
+            
             // Build local callback for remote procedure
             if (Ext.isDefined(method['alias'])) {
                 me.aliases.add(method['alias'], method['name']);// Register alias                
-                me.addRequestMethod(method['alias'], model);
+                me.addRequestMethod(method['alias'], model, method['defaultsMap']);
             } else {
-                me.addRequestMethod(method['name'], model);
+                me.addRequestMethod(method['name'], model, method['defaultsMap']);
             }            
         }
                 
@@ -929,7 +962,7 @@ Ext.define('Ext.ux.data.Jsonrpc', {
                 // </debug>
             };
         } else {
-            return onError;
+            return Ext.emptyFn;
         }
     },
     
@@ -1044,18 +1077,19 @@ Ext.define('Ext.ux.data.Jsonrpc', {
     processResult: function(result) {
         var me = this;
         
-        if (Ext.isDefined(result.error)) {
-
-            // We got error mesage from server
-            result.error.title = 'Server message';
-            me.fireEvent('exception', result.error);
-            return;
-        }
-        
         // Get registered request from collection
         var registered = me.getRequest(result.id);
         
         if (Ext.isDefined(registered)) {
+            
+            if (Ext.isDefined(result.error)) {
+
+                // We got error mesage from server
+                result.error.title = 'Server message';
+                registered.callbacks['failure'].apply(registered.callbacks['scope'], 
+                                                      [result.error]);
+                return;
+            }
             
             // Work with non-empty results only
             if (Ext.isDefined(result.result) && 
@@ -1066,9 +1100,8 @@ Ext.define('Ext.ux.data.Jsonrpc', {
                     result.result = me.requestsHooks.getByKey(registered.method).apply(me, [result.result]);
                 }
                 
-                registered.callback.apply(registered.scope || 
-                                          me.getScope(), 
-                                          [result.result]);
+                registered.callbacks['success'].apply(registered.callbacks['scope'],
+                                                      [result.result]);
             }
             
             // Unregister processed request
@@ -1116,7 +1149,7 @@ Ext.define('Ext.ux.data.Jsonrpc', {
         var batchPostfix = '';
         
         // Build each request config from arguments
-        for (var i=0; i < arguments.length; i++) {
+        for (var i=0; i< arguments.length; i++) {
             var request = me.buildRequest(arguments[i]);
             
             if (request) {
@@ -1201,6 +1234,7 @@ Ext.define('Ext.ux.data.Jsonrpc', {
                                         
                                         // Build error object for result 
                                         result = {
+                                            id: xmlrpcRequestId || null,
                                             error: {
                                                 code: faultResult.faultCode,
                                                 message: faultResult.faultString
